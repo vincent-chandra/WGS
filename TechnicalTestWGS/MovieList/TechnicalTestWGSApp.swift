@@ -9,9 +9,11 @@ import SwiftUI
 
 @main
 struct TechnicalTestWGSApp: App {
+    @StateObject var networkMonitor = NetworkMonitor()
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
-        }
+        }.environmentObject(networkMonitor)
     }
 }

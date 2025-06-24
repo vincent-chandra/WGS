@@ -14,10 +14,18 @@ struct MovieListCell: View {
         VStack {
             Text(title)
                 .multilineTextAlignment(.center)
-                .frame(maxHeight: .infinity, alignment: .bottom)
-            AsyncImage(url: URL(string: urlString))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .cornerRadius(20)
+                .frame(alignment: .bottom)
+            AsyncImage(url: URL(string: urlString)) { result in
+                if result.error != nil {
+                    Image.init("MoviePlaceholder")
+                        .resizable()
+                        .scaledToFit()
+                }
+                result.image?.resizable()
+                    .scaledToFit()
+            }
+            .cornerRadius(20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 }

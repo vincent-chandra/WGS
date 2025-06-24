@@ -8,6 +8,9 @@
 import SwiftUI
 
 struct ContentView: View {
+    @EnvironmentObject var networkMonitor: NetworkMonitor
+    @State private var showNetworkAlert = false
+    
     @State private var searchText = ""
     @State var isSearching = false
     @State var isFinishedFetching = true
@@ -15,6 +18,7 @@ struct ContentView: View {
     
     @State private var movieData = Movies()
     @State private var pageCount = 1
+    @State private var showPopUpError = false
     
     private let totalColumn = [GridItem(.flexible()), GridItem(.flexible())]
 
@@ -33,9 +37,32 @@ struct ContentView: View {
                                         isFinishedFetching = false
                                         self.pageCount += 1
                                         if searchText.isEmpty && !isSearching {
-                                            self.searchMovie(isTrending: true)
+                                            searchMovie(isTrending: true) { result in
+                                                switch result {
+                                                case .success(let movieData):
+                                                    self.movieData.results = movieData
+                                                    self.isSearching = false
+                                                    self.isFinishedFetching = true
+                                                    self.showPopUpError = false
+                                                case .failure(let failure):
+                                                    print("Error:", failure)
+                                                    showPopUpError = true
+                                                }
+                                            }
                                         } else {
-                                            self.searchMovie(isTrending: false)
+                                            searchMovie(isTrending: false) { result in
+                                                switch result {
+                                                case .success(let movieData):
+                                                    self.movieData.results = movieData
+                                                    self.isSearching = false
+                                                    self.isFinishedFetching = true
+                                                    self.showPopUpError = false
+                                                case .failure(let failure):
+                                                    print("Error:", failure)
+                                                    showPopUpError = true
+                                                }
+                                            }
+
                                         }
                                     }
                                 }
@@ -51,18 +78,61 @@ struct ContentView: View {
         }
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always))
         .onAppear(perform: {
-            searchMovie(isTrending: true)
+            searchMovie(isTrending: true) { result in
+                switch result {
+                case .success(let movieData):
+                    self.movieData.results = movieData
+                    self.isSearching = false
+                    self.isFinishedFetching = true
+                    self.showPopUpError = false
+                case .failure(let failure):
+                    print("Error:", failure)
+                    showPopUpError = true
+                }
+            }
+            showNetworkAlert = networkMonitor.isConnected == false
         })
         .onChange(of: searchText) {
             self.pageCount = 1
             self.movieData.results = []
             isSearching = false
             if searchText.isEmpty && !isSearching {
-                self.searchMovie(isTrending: true)
+                searchMovie(isTrending: true) { result in
+                    switch result {
+                    case .success(let movieData):
+                        self.movieData.results = movieData
+                        self.isSearching = false
+                        self.isFinishedFetching = true
+                        self.showPopUpError = false
+                    case .failure(let failure):
+                        print("Error:", failure)
+                        showPopUpError = true
+                    }
+                }
             } else {
-                self.searchMovie(isTrending: false)
+                searchMovie(isTrending: false) { result in
+                    switch result {
+                    case .success(let movieData):
+                        self.movieData.results = movieData
+                        self.isSearching = false
+                        self.isFinishedFetching = true
+                        self.showPopUpError = false
+                    case .failure(let failure):
+                        print("Error:", failure)
+                        showPopUpError = true
+                    }
+                }
+
             }
         }
+        .onChange(of: networkMonitor.isConnected) { connection, _ in
+            showNetworkAlert = connection == false
+        }
+        .alert(
+            "Network connection seems to be offline.",
+            isPresented: $showNetworkAlert
+        ) {}
+        .alert("There is an error when fetching API", isPresented: $showPopUpError) {}
     }
     
     var filteredMovies: [MovieListDetail] {
@@ -73,20 +143,35 @@ struct ContentView: View {
         }
     }
     
-    func searchMovie(isTrending: Bool) {
+    func searchMovie(isTrending: Bool, completion: @escaping (Result<[MovieListDetail], Error>) -> Void) {
         isSearching = true
-        Task {
-            guard let url = isTrending ? URL(string: "https://api.themoviedb.org/3/trending/movie/day?api_key=d7ff494718186ed94ee75cf73c1a3214&page=\(pageCount)")
-            : URL(string: "https://api.themoviedb.org/3/search/movie?api_key=d7ff494718186ed94ee75cf73c1a3214&language=en-US&query=\(searchText)&page=\(pageCount)") else { return }
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let movieDataResult = try JSONDecoder().decode(Movies.self, from: data)
-            var movieDataTemp = movieData.results ?? []
-            movieDataTemp.append(contentsOf: movieDataResult.results ?? [])
-            movieData.results = movieDataTemp
-            isSearching = false
-            isFinishedFetching = true
+        guard let url = isTrending ? URL(string: "https://api.themoviedb.org/3/trending/movie/day?api_key=d7ff494718186ed94ee75cf73c1a3214&page=\(pageCount)")
+                : URL(string: "https://api.themoviedb.org/3/search/movie?api_key=d7ff494718186ed94ee75cf73c1a3214&language=en-US&query=\(searchText)&page=\(pageCount)") else {
+            completion(.failure(URLError(.badURL)))
+            return
         }
-        return
+        
+        let requestTask = URLSession.shared.dataTask(with: url) {
+            (data: Data?, response: URLResponse?, error: Error?) in
+            
+            guard let data = data else {
+                print("URLSession dataTask error:", error ?? "")
+                completion(.failure(error ?? URLError(.badServerResponse)))
+                return
+            }
+            do {
+                let movieDataResult = try JSONDecoder().decode(Movies.self, from: data)
+                var movieDataTemp = movieData.results ?? []
+                movieDataTemp.append(contentsOf: movieDataResult.results ?? [])
+                DispatchQueue.main.async {
+                    completion(.success(movieDataTemp))
+                }
+            } catch {
+                print("JSONSerialization error:", error)
+                completion(.failure(URLError(.cannotDecodeContentData)))
+            }
+        }
+        requestTask.resume()
     }
 }
 
